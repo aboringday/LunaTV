@@ -25,6 +25,10 @@ permissions:
 
 jobs:
   build:
+    permissions:
+      contents: read
+      packages: write
+      actions: write
     strategy:
       matrix:
         include:
@@ -50,7 +54,6 @@ jobs:
           CURRENT_VERSION=$(node -p "require('./package.json').version")
           echo "current_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
 
-          # Check if this is the first commit or if previous commit exists
           if git rev-parse HEAD~1 >/dev/null 2>&1; then
             git checkout HEAD~1 -- package.json 2>/dev/null || echo "{\"version\":\"0.0.0\"}" > package.json.old
             PREVIOUS_VERSION=$(node -p "try { require('./package.json').version } catch(e) { '0.0.0' }")
@@ -102,7 +105,7 @@ jobs:
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ steps.meta.outputs.tags }}
-          outputs: type=image,name=ghcr.io/${{ steps.lowercase.outputs.owner }}/lunatv,name-canonical=true,push=true
+          push: true
           no-cache: true
           pull: true
 
@@ -122,8 +125,11 @@ jobs:
 
   merge:
     runs-on: ubuntu-latest
-    needs:
-      - build
+    needs: [build]
+    permissions:
+      contents: read
+      packages: write
+      actions: write
     steps:
       - name: Checkout source code
         uses: actions/checkout@v6
@@ -204,8 +210,7 @@ jobs:
 
   cleanup-refresh:
     runs-on: ubuntu-latest
-    needs:
-      - merge
+    needs: [merge]
     if: always()
     steps:
       - name: Delete workflow runs
