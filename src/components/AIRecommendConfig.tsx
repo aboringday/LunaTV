@@ -54,12 +54,18 @@ const AIRecommendConfig = ({ config, refreshConfig }: AIRecommendConfigProps) =>
     lastUpdated: null
   });
 
+  // 拉取到的模型列表状态
+  const [fetchedModels, setFetchedModels] = useState<Array<{ id: string; owned_by?: string }>>([]);
+  const [isFetchingModels, setIsFetchingModels] = useState(false);
+  const [showModelDropdown, setShowModelDropdown] = useState(false);
+  const [modelSearchKeyword, setModelSearchKeyword] = useState('');
+
   // 常用模型参考（建议使用支持联网搜索的模型）
   const MODEL_EXAMPLES = [
     'gpt-5 (OpenAI)',
     'o3-mini (OpenAI)',
     'claude-4-opus (Anthropic)',
-    'claude-4-sonnet (Anthropic)', 
+    'claude-4-sonnet (Anthropic)',
     'gemini-2.5-flash (Google)',
     'gemini-2.5-pro (Google)',
     'deepseek-reasoner (DeepSeek)',
@@ -215,6 +221,58 @@ const AIRecommendConfig = ({ config, refreshConfig }: AIRecommendConfigProps) =>
     }
   };
 
+  // 拉取模型列表
+  const handleFetchModels = async () => {
+    if (!aiSettings.apiUrl.trim() || !aiSettings.apiKey.trim()) {
+      showMessage('error', '请先填写API地址和密钥');
+      return;
+    }
+
+    setIsFetchingModels(true);
+    setShowModelDropdown(false);
+    try {
+      const response = await fetch('/api/admin/ai-recommend/models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          apiUrl: aiSettings.apiUrl,
+          apiKey: aiSettings.apiKey
+        })
+      });
+
+      if (!response.ok) {
+        let errorMessage = '拉取模型列表失败';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorMessage;
+          if (errorData.hint) {
+            errorMessage += `\n${errorData.hint}`;
+          }
+        } catch {
+          errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        }
+        throw new Error(errorMessage);
+      }
+
+      const data = await response.json();
+      setFetchedModels(data.models || []);
+      setShowModelDropdown(true);
+      setModelSearchKeyword('');
+      showMessage('success', `成功拉取 ${data.count} 个模型`);
+    } catch (err) {
+      console.error('拉取模型列表错误:', err);
+      let errorMessage = '拉取模型列表失败';
+      if (err instanceof Error) {
+        errorMessage = err.message;
+      }
+      showMessage('error', errorMessage);
+      setFetchedModels([]);
+      setShowModelDropdown(false);
+    } finally {
+      setIsFetchingModels(false);
+    }
+  };
+
   // 获取 Tavily API 用量
   const fetchTavilyUsage = async (singleKeyIndex?: number) => {
     // 先保存输入到 state（如果用户刚输入还没失焦）
@@ -305,11 +363,10 @@ const AIRecommendConfig = ({ config, refreshConfig }: AIRecommendConfigProps) =>
     <div className='space-y-6'>
       {/* 消息提示 */}
       {message && (
-        <div className={`flex items-center space-x-2 p-3 rounded-lg ${
-          message.type === 'success' 
-            ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800'
-            : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800'
-        }`}>
+        <div className={`flex items-center space-x-2 p-3 rounded-lg ${message.type === 'success'
+          ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800'
+          : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800'
+          }`}>
           {message.type === 'success' ? (
             <CheckCircle className="h-5 w-5" />
           ) : (
@@ -318,7 +375,7 @@ const AIRecommendConfig = ({ config, refreshConfig }: AIRecommendConfigProps) =>
           <span>{message.text}</span>
         </div>
       )}
-      
+
       {/* 基础设置 */}
       <div className='bg-white dark:bg-gray-800 rounded-lg p-6 border border-gray-200 dark:border-gray-700 shadow-sm'>
         <div className='mb-6'>
@@ -354,14 +411,12 @@ const AIRecommendConfig = ({ config, refreshConfig }: AIRecommendConfigProps) =>
               checked={aiSettings.enabled}
               onChange={(e) => setAiSettings(prev => ({ ...prev, enabled: e.target.checked }))}
             />
-            <div className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-              aiSettings.enabled
-                ? 'bg-blue-600'
-                : 'bg-gray-200 dark:bg-gray-600'
-            }`}>
-              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                aiSettings.enabled ? 'translate-x-6' : 'translate-x-1'
-              }`} />
+            <div className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${aiSettings.enabled
+              ? 'bg-blue-600'
+              : 'bg-gray-200 dark:bg-gray-600'
+              }`}>
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${aiSettings.enabled ? 'translate-x-6' : 'translate-x-1'
+                }`} />
             </div>
             <span className='ml-3 text-sm font-medium text-gray-900 dark:text-gray-100'>
               启用AI推荐功能
@@ -476,13 +531,100 @@ const AIRecommendConfig = ({ config, refreshConfig }: AIRecommendConfigProps) =>
               <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
                 模型名称 <span className='text-xs text-gray-500 dark:text-gray-400'>(Tavily纯搜索模式可留空)</span>
               </label>
-              <input
-                type='text'
-                value={aiSettings.model}
-                onChange={(e) => setAiSettings(prev => ({ ...prev, model: e.target.value }))}
-                className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500'
-                placeholder='请自行填入正确的官方API模型名称，如：gpt-5'
-              />
+              <div className='flex gap-2'>
+                <input
+                  type='text'
+                  value={aiSettings.model}
+                  onChange={(e) => {
+                    setAiSettings(prev => ({ ...prev, model: e.target.value }));
+                    setHasUnsavedChanges(true);
+                  }}
+                  className='flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500'
+                  placeholder='请自行填入正确的官方API模型名称，如：gpt-5'
+                />
+                <button
+                  type='button'
+                  onClick={handleFetchModels}
+                  disabled={isFetchingModels || !aiSettings.apiUrl.trim() || !aiSettings.apiKey.trim()}
+                  className={`px-3 py-2 text-sm font-medium rounded-lg transition-colors whitespace-nowrap flex items-center gap-1.5 ${isFetchingModels || !aiSettings.apiUrl.trim() || !aiSettings.apiKey.trim()
+                      ? 'bg-gray-400 dark:bg-gray-600 cursor-not-allowed text-white'
+                      : 'bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-700 text-white'
+                    }`}
+                  title={!aiSettings.apiUrl.trim() || !aiSettings.apiKey.trim() ? '请先填写API地址和密钥' : '从API拉取可用模型列表'}
+                >
+                  {isFetchingModels ? (
+                    <>
+                      <svg className='animate-spin h-4 w-4' fill='none' viewBox='0 0 24 24'>
+                        <circle className='opacity-25' cx='12' cy='12' r='10' stroke='currentColor' strokeWidth='4'></circle>
+                        <path className='opacity-75' fill='currentColor' d='M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z'></path>
+                      </svg>
+                      <span>拉取中...</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg className='w-4 h-4' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
+                        <path strokeLinecap='round' strokeLinejoin='round' strokeWidth={2} d='M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4' />
+                      </svg>
+                      <span>拉取模型</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* 拉取到的模型列表下拉选择 */}
+              {showModelDropdown && fetchedModels.length > 0 && (
+                <div className='mt-2 border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 overflow-hidden'>
+                  <div className='p-2 border-b border-gray-200 dark:border-gray-600'>
+                    <input
+                      type='text'
+                      value={modelSearchKeyword}
+                      onChange={(e) => setModelSearchKeyword(e.target.value)}
+                      placeholder='搜索模型...'
+                      className='w-full px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-1 focus:ring-blue-500 focus:border-blue-500'
+                    />
+                  </div>
+                  <div className='max-h-48 overflow-y-auto'>
+                    {fetchedModels
+                      .filter(m => !modelSearchKeyword.trim() || m.id.toLowerCase().includes(modelSearchKeyword.toLowerCase().trim()))
+                      .map((model) => (
+                        <button
+                          key={model.id}
+                          type='button'
+                          onClick={() => {
+                            setAiSettings(prev => ({ ...prev, model: model.id }));
+                            setShowModelDropdown(false);
+                            setHasUnsavedChanges(true);
+                          }}
+                          className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors flex items-center justify-between ${aiSettings.model === model.id ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 font-medium' : 'text-gray-700 dark:text-gray-300'
+                            }`}
+                        >
+                          <span className='truncate'>{model.id}</span>
+                          {model.owned_by && (
+                            <span className='text-xs text-gray-400 dark:text-gray-500 ml-2 shrink-0'>{model.owned_by}</span>
+                          )}
+                        </button>
+                      ))}
+                    {fetchedModels.filter(m => !modelSearchKeyword.trim() || m.id.toLowerCase().includes(modelSearchKeyword.toLowerCase().trim())).length === 0 && (
+                      <div className='px-3 py-2 text-sm text-gray-500 dark:text-gray-400 text-center'>
+                        未找到匹配的模型
+                      </div>
+                    )}
+                  </div>
+                  <div className='p-2 border-t border-gray-200 dark:border-gray-600 flex items-center justify-between'>
+                    <span className='text-xs text-gray-500 dark:text-gray-400'>
+                      共 {fetchedModels.length} 个模型
+                    </span>
+                    <button
+                      type='button'
+                      onClick={() => setShowModelDropdown(false)}
+                      className='text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                    >
+                      关闭
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className='mt-2 text-xs text-gray-500 dark:text-gray-400'>
                 <p className='mb-1'>常用模型参考（建议使用支持联网搜索的模型）：</p>
                 <p className='mb-2 text-orange-600 dark:text-orange-400'>⚠️ 请确保填入的模型名称与API提供商的官方文档一致</p>
@@ -494,6 +636,7 @@ const AIRecommendConfig = ({ config, refreshConfig }: AIRecommendConfigProps) =>
                       onClick={() => {
                         const modelName = example.split(' (')[0];
                         setAiSettings(prev => ({ ...prev, model: modelName }));
+                        setHasUnsavedChanges(true);
                       }}
                       className='inline-block px-2 py-1 text-xs bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded cursor-pointer transition-colors'
                     >
@@ -568,14 +711,12 @@ const AIRecommendConfig = ({ config, refreshConfig }: AIRecommendConfigProps) =>
                 checked={aiSettings.enableOrchestrator}
                 onChange={(e) => setAiSettings(prev => ({ ...prev, enableOrchestrator: e.target.checked }))}
               />
-              <div className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                aiSettings.enableOrchestrator
-                  ? 'bg-purple-600'
-                  : 'bg-gray-200 dark:bg-gray-600'
-              }`}>
-                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                  aiSettings.enableOrchestrator ? 'translate-x-6' : 'translate-x-1'
-                }`} />
+              <div className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${aiSettings.enableOrchestrator
+                ? 'bg-purple-600'
+                : 'bg-gray-200 dark:bg-gray-600'
+                }`}>
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${aiSettings.enableOrchestrator ? 'translate-x-6' : 'translate-x-1'
+                  }`} />
               </div>
               <span className='ml-3 text-sm font-medium text-gray-900 dark:text-gray-100'>
                 启用智能协调器（意图分析）
@@ -598,14 +739,12 @@ const AIRecommendConfig = ({ config, refreshConfig }: AIRecommendConfigProps) =>
                     checked={aiSettings.enableWebSearch}
                     onChange={(e) => setAiSettings(prev => ({ ...prev, enableWebSearch: e.target.checked }))}
                   />
-                  <div className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    aiSettings.enableWebSearch
-                      ? 'bg-green-600'
-                      : 'bg-gray-200 dark:bg-gray-600'
-                  }`}>
-                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                      aiSettings.enableWebSearch ? 'translate-x-6' : 'translate-x-1'
-                    }`} />
+                  <div className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${aiSettings.enableWebSearch
+                    ? 'bg-green-600'
+                    : 'bg-gray-200 dark:bg-gray-600'
+                    }`}>
+                    <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${aiSettings.enableWebSearch ? 'translate-x-6' : 'translate-x-1'
+                      }`} />
                   </div>
                   <span className='ml-3 text-sm font-medium text-gray-900 dark:text-gray-100'>
                     启用联网搜索（Tavily）
@@ -801,13 +940,12 @@ const AIRecommendConfig = ({ config, refreshConfig }: AIRecommendConfigProps) =>
                                     </div>
                                     <div className='h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden'>
                                       <div
-                                        className={`h-full rounded-full transition-all ${
-                                          (usage.keyUsage / usage.keyLimit) > 0.9
-                                            ? 'bg-red-500'
-                                            : (usage.keyUsage / usage.keyLimit) > 0.7
+                                        className={`h-full rounded-full transition-all ${(usage.keyUsage / usage.keyLimit) > 0.9
+                                          ? 'bg-red-500'
+                                          : (usage.keyUsage / usage.keyLimit) > 0.7
                                             ? 'bg-yellow-500'
                                             : 'bg-green-500'
-                                        }`}
+                                          }`}
                                         style={{ width: `${Math.min((usage.keyUsage / usage.keyLimit) * 100, 100)}%` }}
                                       />
                                     </div>
@@ -826,13 +964,12 @@ const AIRecommendConfig = ({ config, refreshConfig }: AIRecommendConfigProps) =>
                                     </div>
                                     <div className='h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden'>
                                       <div
-                                        className={`h-full rounded-full transition-all ${
-                                          (usage.planUsage / usage.planLimit) > 0.9
-                                            ? 'bg-red-500'
-                                            : (usage.planUsage / usage.planLimit) > 0.7
+                                        className={`h-full rounded-full transition-all ${(usage.planUsage / usage.planLimit) > 0.9
+                                          ? 'bg-red-500'
+                                          : (usage.planUsage / usage.planLimit) > 0.7
                                             ? 'bg-yellow-500'
                                             : 'bg-purple-500'
-                                        }`}
+                                          }`}
                                         style={{ width: `${Math.min((usage.planUsage / usage.planLimit) * 100, 100)}%` }}
                                       />
                                     </div>
@@ -872,16 +1009,15 @@ const AIRecommendConfig = ({ config, refreshConfig }: AIRecommendConfigProps) =>
             {isLoading ? '测试中...' : '测试连接'}
           </button>
         )}
-        
+
         {/* 保存按钮 - 始终显示 */}
         <button
           onClick={handleSave}
           disabled={isLoading}
-          className={`flex items-center px-4 py-2 ${
-            hasUnsavedChanges
-              ? 'bg-orange-600 hover:bg-orange-700 animate-pulse'
-              : 'bg-blue-600 hover:bg-blue-700'
-          } disabled:bg-gray-400 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors`}
+          className={`flex items-center px-4 py-2 ${hasUnsavedChanges
+            ? 'bg-orange-600 hover:bg-orange-700 animate-pulse'
+            : 'bg-blue-600 hover:bg-blue-700'
+            } disabled:bg-gray-400 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors`}
         >
           <svg className='h-4 w-4 mr-2' fill='none' stroke='currentColor' viewBox='0 0 24 24'>
             <path strokeLinecap='round' strokeLinejoin='round' strokeWidth={2} d='M5 13l4 4L19 7' />
